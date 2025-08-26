@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Activities</title>
+    <style>
+      body{font:14px system-ui, -apple-system, Segoe UI, Roboto, sans-serif;margin:0;padding:20px;max-width:960px}
+      h2{margin:0 0 12px}
+      #list > div{border:1px solid #ddd;border-radius:10px;padding:10px;margin:10px 0}
+      small{color:#555}
+      button{padding:8px 10px;border:1px solid #555;border-radius:8px;cursor:pointer;background:#111;color:#fff}
+      .toolbar{display:flex;gap:8px;align-items:center;margin-bottom:12px}
+      .muted{color:#666}
+    </style>
+  </head>
+  <body>
+    <div class="toolbar">
+      <h2 style="flex:1">Activities</h2>
+      <button id="exportZip">Export ZIP</button>
+    </div>
+
+    <div id="list" class="muted">Loading…</div>
+
+    <script src="options.js"></script>
+  </body>
+</html>

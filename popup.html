@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Activity Timer</title>
+    <style>
+      body{font:14px system-ui, -apple-system, Segoe UI, Roboto, sans-serif;margin:0;padding:12px;width:300px}
+      label{display:block;margin:8px 0 4px}
+      input[type="text"], textarea{width:100%;box-sizing:border-box;padding:6px;border:1px solid #ccc;border-radius:6px}
+      textarea{resize:vertical}
+      .row{display:flex;gap:8px;margin:10px 0}
+      button{flex:1;padding:8px 10px;border:1px solid #555;border-radius:8px;cursor:pointer;background:#111;color:#fff}
+      button.secondary{background:#fff;color:#111}
+      #status{margin-top:8px;color:#0a7}
+    </style>
+  </head>
+  <body>
+    <label>Title</label>
+    <input id="title" type="text" placeholder="What are you doing?">
+
+    <label>Description</label>
+    <textarea id="desc" rows="4" placeholder="Notes..."></textarea>
+
+    <label>Attachments</label>
+    <input id="files" type="file" multiple>
+
+    <div class="row">
+      <button id="start">Start</button>
+      <button id="stop" class="secondary">Stop</button>
+    </div>
+
+    <div id="status"></div>
+
+    <p style="margin-top:12px"><a href="options.html" target="_blank">Open activities & export →</a></p>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

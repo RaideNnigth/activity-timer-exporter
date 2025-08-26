@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Activity Timer & Exporter",
+  "version": "0.1.0",
+  "description": "Start/stop a timer, add title/description and file attachments, then export everything to a ZIP with a worksheet (CSV).",
+  "action": { "default_popup": "popup.html" },
+  "options_page": "options.html",
+  "background": { "service_worker": "worker.js" },
+  "permissions": ["storage", "downloads"],
+  "icons": {},
+  "host_permissions": []
+}
