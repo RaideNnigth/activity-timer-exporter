@@ -6,6 +6,7 @@ This Chrome extension lets you:
 - Export everything into a **ZIP** containing a CSV worksheet + attachment files
 
 ⚡ Everything runs **100% client-side**. No data leaves your computer.
+
 <img width="355" height="487" alt="image" src="https://github.com/user-attachments/assets/9ca1920f-17a6-449c-9db9-12c4d59e46ea" />
 <img width="331" height="397" alt="image" src="https://github.com/user-attachments/assets/5a661df0-ac93-48ee-a8f9-db1100e41129" />
 <img width="1086" height="477" alt="image" src="https://github.com/user-attachments/assets/82a6f09e-830a-4d48-aca3-faa9a2b6622e" />
