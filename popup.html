@@ -12,9 +12,16 @@
       button{flex:1;padding:8px 10px;border:1px solid #555;border-radius:8px;cursor:pointer;background:#111;color:#fff}
       button.secondary{background:#fff;color:#111}
       #status{margin-top:8px;color:#0a7}
+      #runningBox{background:#f5f5f5;border:1px solid #e0e0e0;border-radius:8px;padding:8px;margin:8px 0;display:none}
     </style>
   </head>
   <body>
+    <div id="runningBox">
+      <div><b id="rTitle">(running)</b></div>
+      <small id="rTimes">—</small><br>
+      <small>Elapsed: <span id="rElapsed">0s</span></small>
+    </div>
+
     <label>Title</label>
     <input id="title" type="text" placeholder="What are you doing?">
 
@@ -26,7 +33,7 @@
 
     <div class="row">
       <button id="start">Start</button>
-      <button id="stop" class="secondary">Stop</button>
+      <button id="stop" class="secondary" disabled>Stop</button>
     </div>
 
     <div id="status"></div>

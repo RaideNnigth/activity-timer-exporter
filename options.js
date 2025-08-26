@@ -5,13 +5,14 @@ function fmt(ts){ if(!ts) return ''; const d=new Date(ts); return d.toISOString(
 async function load() {
   const res = await chrome.runtime.sendMessage({ type: 'LIST_ACTIVITIES' });
   const list = $('#list'); list.innerHTML = '';
-  const items = (res.activities||[]).sort((a,b)=>b.startTs-a.startTs);
-  if (!items.length) list.textContent = 'No activities yet.';
+  const items = (res.activities||[]).sort((a,b)=> (b.startTs||0)-(a.startTs||0));
+  if (!items.length) { list.textContent = 'No activities yet.'; return; }
   for (const a of items) {
     const div = document.createElement('div');
+    const durH = a.durationMs ? Math.round((a.durationMs/3600000)*100)/100 : (a.startTs ? '(running)' : '(draft)');
     div.innerHTML = `
       <b>${escapeHTML(a.title || '(no title)')}</b><br>
-      <small>${fmt(a.startTs)} → ${fmt(a.endTs)} ${a.durationMs?`(${Math.round(a.durationMs/1000)}s)`:''}</small>
+      <small>${fmt(a.startTs)} → ${fmt(a.endTs)} ${durH!==''?`(${durH} h)`:''}</small>
       <div>${escapeHTML(a.description || '')}</div>
       <div><i>${(a.attachments?.length||0)} attachment(s)</i></div>
     `;
@@ -25,8 +26,8 @@ $('#exportZip').onclick = async () => {
   const res = await chrome.runtime.sendMessage({ type: 'EXPORT_DATA' });
   const activities = res.activities || [];
 
-  // Build CSV content
-  const rows = [['id','title','description','start','end','duration_seconds','attachments']];
+  // Build CSV with duration in hours
+  const rows = [['id','title','description','start','end','duration_hours','attachments']];
   for (const a of activities) {
     rows.push([
       a.id,
@@ -34,38 +35,64 @@ $('#exportZip').onclick = async () => {
       (a.description||'').replace(/\r?\n/g,' '),
       a.startTs ? new Date(a.startTs).toISOString() : '',
       a.endTs ? new Date(a.endTs).toISOString() : '',
-      a.durationMs ? Math.round(a.durationMs/1000) : '',
+      a.durationMs ? (Math.round((a.durationMs/3600000) * 100) / 100) : '',
       (a.attachments||[]).map(x=>x.name).join('|')
     ]);
   }
   const csv = rows.map(r => r.map(v => '"' + String(v).replace(/"/g,'""') + '"').join(',')).join('\n');
   const csvBlob = new Blob([csv], { type: 'text/csv' });
 
-  // Prepare files for ZIP: activities.csv + each attachment in folders
+  // Prepare files for ZIP: activities.csv + each attachment fetched from BG
   const files = [{
     path: 'activities.csv',
     data: new Uint8Array(await csvBlob.arrayBuffer())
   }];
   for (const a of activities) {
-    const base = `attachments/${a.id}_${(a.title||'').slice(0,30).replace(/[^\w\- ]/g,'_')}`;
+    const safeTitle = (a.title||'').slice(0,30).replace(/[^\w\- ]/g,'_');
+    const base = `attachments/${a.id}_${safeTitle}`;
     for (const att of (a.attachments||[])) {
-      const arr = new Uint8Array(await att.data.arrayBuffer());
+      const r = await chrome.runtime.sendMessage({
+        type: 'READ_ATTACHMENT',
+        activityId: a.id,
+        attachmentId: att.id
+      });
+      if (!r || !r.ok) {
+        console.warn('Could not read attachment', att?.name, r?.error);
+        continue;
+      }
+      const arr = new Uint8Array(r.buffer);
       files.push({ path: `${base}/${att.name}`, data: arr });
     }
   }
 
+  // Build ZIP (store-only)
   const zipBlob = await createZipBlob(files);
   const url = URL.createObjectURL(zipBlob);
-  await chrome.downloads.download({ url, filename: 'activity_export.zip', saveAs: true });
-  setTimeout(()=>URL.revokeObjectURL(url), 60000);
+
+  // Download and then CLEAR ALL after the download completes
+  const downloadId = await chrome.downloads.download({ url, filename: 'activity_export.zip', saveAs: true });
+
+  const onChanged = async delta => {
+    if (delta.id !== downloadId) return;
+    if (delta.state && delta.state.current === 'complete') {
+      chrome.downloads.onChanged.removeListener(onChanged);
+      URL.revokeObjectURL(url);
+      await chrome.runtime.sendMessage({ type: 'CLEAR_ALL' });
+      await load(); // refresh UI list (now empty)
+    }
+    if (delta.state && delta.state.current === 'interrupted') {
+      chrome.downloads.onChanged.removeListener(onChanged);
+      URL.revokeObjectURL(url);
+      // do not clear if download failed
+    }
+  };
+  chrome.downloads.onChanged.addListener(onChanged);
 };
 
 // ---------------------------
 // Minimal ZIP (store-only) writer
-// Writes local file headers + central dir; UTF-8 filenames; no compression
 // ---------------------------
 async function createZipBlob(files){
-  // Precompute CRC32 and sizes
   const fileEntries = [];
   let offset = 0;
   for (const f of files) {
@@ -77,95 +104,76 @@ async function createZipBlob(files){
     offset += localHeader + data.length;
     fileEntries.push(entry);
   }
-
-  // Central directory
   let centralSize = 0;
-  for (const e of fileEntries) {
-    centralSize += 46 + e.nameBytes.length; // fixed size + name len (no extra/comment)
-  }
+  for (const e of fileEntries) centralSize += 46 + e.nameBytes.length;
 
-  const endSize = 22; // EOCD fixed size, no comment
+  const endSize = 22;
   const totalSize = offset + centralSize + endSize;
   const out = new Uint8Array(totalSize);
   let p = 0;
 
-  // Write local file headers + data
   for (const e of fileEntries) {
-    // Local header signature
     writeUint32(out, p, 0x04034b50); p += 4;
-    writeUint16(out, p, 20); p += 2;              // version needed to extract
-    writeUint16(out, p, 0x0800); p += 2;          // general purpose (UTF-8)
-    writeUint16(out, p, 0); p += 2;               // method: 0 (store)
-    writeUint16(out, p, 0); p += 2;               // file mod time (0)
-    writeUint16(out, p, 0); p += 2;               // file mod date (0)
-    writeUint32(out, p, e.crc >>> 0); p += 4;     // CRC32
-    writeUint32(out, p, e.size); p += 4;          // compressed size
-    writeUint32(out, p, e.size); p += 4;          // uncompressed size
-    writeUint16(out, p, e.nameBytes.length); p += 2; // file name length
-    writeUint16(out, p, 0); p += 2;               // extra length
+    writeUint16(out, p, 20); p += 2;
+    writeUint16(out, p, 0x0800); p += 2;
+    writeUint16(out, p, 0); p += 2;
+    writeUint16(out, p, 0); p += 2;
+    writeUint16(out, p, 0); p += 2;
+    writeUint32(out, p, e.crc >>> 0); p += 4;
+    writeUint32(out, p, e.size); p += 4;
+    writeUint32(out, p, e.size); p += 4;
+    writeUint16(out, p, e.nameBytes.length); p += 2;
+    writeUint16(out, p, 0); p += 2;
     out.set(e.nameBytes, p); p += e.nameBytes.length;
-    out.set(e.data, p); p += e.data.length;       // file data
+    out.set(e.data, p); p += e.data.length;
   }
 
   const centralDirOffset = p;
 
-  // Write central directory entries
   for (const e of fileEntries) {
-    writeUint32(out, p, 0x02014b50); p += 4; // central header signature
-    writeUint16(out, p, 20); p += 2;         // version made by
-    writeUint16(out, p, 20); p += 2;         // version needed to extract
-    writeUint16(out, p, 0x0800); p += 2;     // general purpose (UTF-8)
-    writeUint16(out, p, 0); p += 2;          // method: 0
-    writeUint16(out, p, 0); p += 2;          // time
-    writeUint16(out, p, 0); p += 2;          // date
+    writeUint32(out, p, 0x02014b50); p += 4;
+    writeUint16(out, p, 20); p += 2;
+    writeUint16(out, p, 20); p += 2;
+    writeUint16(out, p, 0x0800); p += 2;
+    writeUint16(out, p, 0); p += 2;
+    writeUint16(out, p, 0); p += 2;
+    writeUint16(out, p, 0); p += 2;
     writeUint32(out, p, e.crc >>> 0); p += 4;
-    writeUint32(out, p, e.size); p += 4;     // comp size
-    writeUint32(out, p, e.size); p += 4;     // uncomp size
-    writeUint16(out, p, e.nameBytes.length); p += 2; // name len
-    writeUint16(out, p, 0); p += 2;          // extra len
-    writeUint16(out, p, 0); p += 2;          // comment len
-    writeUint16(out, p, 0); p += 2;          // disk number start
-    writeUint16(out, p, 0); p += 2;          // internal attrs
-    writeUint32(out, p, 0); p += 4;          // external attrs
-    writeUint32(out, p, e.offset); p += 4;   // local header offset
+    writeUint32(out, p, e.size); p += 4;
+    writeUint32(out, p, e.size); p += 4;
+    writeUint16(out, p, e.nameBytes.length); p += 2;
+    writeUint16(out, p, 0); p += 2;
+    writeUint16(out, p, 0); p += 2;
+    writeUint16(out, p, 0); p += 2;
+    writeUint16(out, p, 0); p += 2;
+    writeUint32(out, p, 0); p += 4;
+    writeUint32(out, p, e.offset); p += 4;
     out.set(e.nameBytes, p); p += e.nameBytes.length;
   }
 
   const centralDirSize = p - centralDirOffset;
 
-  // EOCD
   writeUint32(out, p, 0x06054b50); p += 4;
-  writeUint16(out, p, 0); p += 2;            // disk number
-  writeUint16(out, p, 0); p += 2;            // start disk
-  writeUint16(out, p, fileEntries.length); p += 2; // # entries on this disk
-  writeUint16(out, p, fileEntries.length); p += 2; // total # entries
-  writeUint32(out, p, centralDirSize); p += 4;     // central dir size
-  writeUint32(out, p, centralDirOffset); p += 4;   // central dir offset
-  writeUint16(out, p, 0); p += 2;            // comment length
+  writeUint16(out, p, 0); p += 2;
+  writeUint16(out, p, 0); p += 2;
+  writeUint16(out, p, fileEntries.length); p += 2;
+  writeUint16(out, p, fileEntries.length); p += 2;
+  writeUint32(out, p, centralDirSize); p += 4;
+  writeUint32(out, p, centralDirOffset); p += 4;
+  writeUint16(out, p, 0); p += 2;
 
   return new Blob([out], { type: 'application/zip' });
 }
 
 function writeUint16(buf, pos, val){ buf[pos] = val & 0xff; buf[pos+1] = (val>>>8)&0xff; }
 function writeUint32(buf, pos, val){ buf[pos] = val & 0xff; buf[pos+1] = (val>>>8)&0xff; buf[pos+2] = (val>>>16)&0xff; buf[pos+3] = (val>>>24)&0xff; }
-
 function utf8Encode(str){ return new TextEncoder().encode(str); }
 
-// CRC32 (IEEE 802.3) for Uint8Array
-const CRC_TABLE = (()=>{
-  let c, table = new Uint32Array(256);
-  for (let n=0; n<256; n++) {
-    c = n;
-    for (let k=0;k<8;k++) c = (c & 1) ? (0xEDB88320 ^ (c>>>1)) : (c>>>1);
-    table[n] = c >>> 0;
-  }
-  return table;
-})();
-function crc32(u8){
-  let c = 0 ^ (-1);
-  for (let i=0;i<u8.length;i++) c = (c>>>8) ^ CRC_TABLE[(c ^ u8[i]) & 0xFF];
-  return (c ^ (-1)) >>> 0;
-}
+// CRC32
+const CRC_TABLE = (()=>{ let c, t = new Uint32Array(256);
+  for (let n=0;n<256;n++){ c=n; for (let k=0;k<8;k++) c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1); t[n]=c>>>0; }
+  return t; })();
+function crc32(u8){ let c=0^(-1); for (let i=0;i<u8.length;i++) c=(c>>>8)^CRC_TABLE[(c^u8[i])&0xFF]; return (c^(-1))>>>0; }
 
-// Load the list on open
+// Load on open
 load();
