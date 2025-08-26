@@ -63,10 +63,3 @@ activity-timer-exporter/
 - The extension works offline.
 
 ---
-
-## Next Steps
-When ready to publish:
-- Zip the folder (without `.git` or `node_modules`)
-- Upload to the [Chrome Web Store Developer Dashboard](https://chrome.google.com/webstore/devconsole/)
-
-For now, this README covers **Developer Mode installation only**.
